@@ -1,0 +1,161 @@
+#!/bin/sh
+
+export POSIXLY_CORRECT=yes
+export LC_NUMERIC=en_US.UTF-8
+
+#Project IOS#1 by Aleksandr Verevkin (xverev00)
+#VUT FIT 04.04.2021
+
+#help function
+
+print_help()
+{
+echo "Usage:" 
+echo "   tradelog [-h|--help]"
+echo "   tradelog [FILTER...] [COMMAND] [LOG [LOG2 [...]]]"
+echo "========================================"
+echo "Commands, one from:"
+echo "   list-tick         Print all tickers"
+echo "   profit            Print profit"
+echo "   pos               Print list of values of held positions for each ticker"
+echo "   last-price        Print last known price for each ticker"
+echo "   hist-ord          Print histogram of the number of transactions for each ticker"
+echo "   graph-pos         Print graph of values of held positions for each ticker"
+echo "========================================"
+echo "Filters, can be a combination of:"
+echo "   -a DATETIME       Process only dates after  (Format: YY-MM-DD HH-MM-SS)"
+echo "   -b DATETIME       Process only dates before (Format: YY-MM-DD HH-MM-SS)"
+echo "   -t TICKER         Process only selected tickers"
+echo "   -w WIDTH          Maximum width of line (Commands: hist-ord OR graph-pos)"
+echo "                     More than one occurrence of an WIDTH argument will produce an error"
+echo "========================================"
+echo "The script can process records compressed with the gzip tool."
+}
+
+#assignment of standart variables
+
+COMMAND=""
+WIDTH=""
+FILE=""
+GZ=""
+ADATE="0000-00-00 00:00:00"
+BDATE="9999-99-99 99:99:99"
+FTICKER=""
+
+#arguments handlings
+
+while  [ "$#" -gt 0 ]; do
+  case "$1" in
+  list-tick | profit | pos | last-price | hist-ord | graph-pos)
+  if [ "$COMMAND" = "" ]; then
+    COMMAND="$1"
+  else
+    echo ERROR: there can be only one COMMAND			#error in case of calling more than 1 existing commands
+    exit 1
+  fi
+    shift
+    ;;
+  --help | -h)
+    print_help			#calling of help function
+    exit 0
+    ;;
+  -w)
+  if [ "$WIDTH" = "" ]; then
+    WIDTH="$2"
+  else
+    echo CHYBA: there can be only one -w		#error in case of calling more than 1 filter -w
+    exit 1
+  fi
+  if [ "$WIDTH" != "${WIDTH%.*}" ] || [ "$WIDTH" -lt 0 ]; then
+    echo CHYBA: WIDTH number must be whole and positive			#error in case of float or not positive number of -w
+    exit 1
+  fi
+    shift
+    shift
+    ;;
+  -a)
+  if [ "$BDATE" != "0000-00-00 00:00:00" ];then
+    ANEW="$2"
+    ADATE=$(echo "$ANEW" | awk -v last="$ADATE" '{if($0 > last){print $0}else{print last}}')
+  else
+    ADATE="$2"
+  fi
+    shift
+    shift
+    ;;
+  -b)
+  if [ "$BDATE" != "9999-99-99 99:99:99" ];then
+    BNEW="$2"
+    BDATE=$(echo "$BNEW" | awk -v last="$BDATE" '{if($0 < last){print $0}else{print last}}')
+  else
+    BDATE="$2"
+  fi
+    shift
+    shift
+    ;;
+  -t)
+    FTICKER=$FTICKER";$2;|"
+    shift
+    shift
+    ;;
+  -*)
+    echo ERROR: invalid filter			#error in case of not existing filter
+    exit 1
+    ;;
+  *.gz)
+    GZ=$GZ"$1 "
+    shift
+    ;;
+  *)
+    FILE=$FILE"$1 "
+    shift
+    ;;
+  esac
+done
+
+#file handling
+
+if [ "$GZ" = "" ] && [ "$FILE" = "" ]; then
+INPUT="cat"					#read from std input
+elif [ "$GZ" != "" ]; then
+INPUT="zcat $GZ"				#read gzip files
+else
+INPUT="cat $FILE"				#read other text files
+fi
+
+FTICKER=${FTICKER%?}
+
+#commands handling
+
+if [ "$COMMAND" = "" ]; then		#in case of no command print list to stdout
+	eval "$INPUT" | grep -E "$FTICKER" | awk -v atime="$ADATE" -v btime="$BDATE" -F ';' '{if ($1 < btime && $1 > atime) {print $0}}'
+	exit 0
+elif [ "$COMMAND" = "list-tick" ]; then			#command that print all existing tickers
+	eval "$INPUT" | grep -E "$FTICKER" | awk -v atime="$ADATE" -v btime="$BDATE" -F ';' '{if ($1 < btime && $1 > atime) {print $0}}' | awk -F ';' '{print $2}' | sort -u
+	exit 0
+elif [ "$COMMAND" = "profit" ]; then		#command that print profit of existing positions
+	eval "$INPUT" | grep -E "$FTICKER" | awk -v atime="$ADATE" -v btime="$BDATE" -F ';' '{if ($1 < btime && $1 > atime) {print $0}}' | 
+        awk -F ';' 'BEGIN {s=0;b=0} {if ($3 == "sell") {s+=$4*$6} else if ($3 == "buy") {b+=$4*$6}} END {printf "%.2f\n", s-b}'
+	exit 0
+elif [ "$COMMAND" = "pos" ]; then		#command that print values of holding positions
+	eval "$INPUT" | grep -E "$FTICKER" | awk -v atime="$ADATE" -v btime="$BDATE" -F ';' '{if ($1 < btime && $1 > atime) {print $0}}' | sort -t ';' -k 2,2 |
+	awk -F ';' 'BEGIN{s=0;b=0;ml=0;f="f"}{if(f=="f"){f="nf";{if($3=="buy"){b+=$6}else if($3=="sell"){s+=$6}}}else if($2==t){if($3=="buy"){b+=$6}else if($3=="sell"){s+=$6}}else if($2!=t){printf "%-10s:%.2f\n",t,(b-s)*pt;{if((length(int((b-s)*pt))+3)>ml){ml=length(int((b-s)*pt))+3}};s=0;b=0;{if($3=="sell"){s+=$6}else if($3=="buy"){b+=$6}}}t=$2;pt=$4} END {printf "%-10s:%.2f\n",t,(b-s)*pt;{if((length(int((b-s)*pt))+3)>ml){ml=length(int((b-s)*pt))+3}};printf ml"\n"}' | sort -nr | awk -F ':' 'BEGIN{f="f"}{if(f=="f"){f="nf";ml=$0+1}else{printf $1":%*.2f\n",ml,$2}}' | sort -t ':' -k 2,2 -nr
+	exit 0
+elif [ "$COMMAND" = "last-price" ]; then		#command that print last-known price for each ticker
+	eval "$INPUT" | grep -E "$FTICKER" | awk -v atime="$ADATE" -v btime="$BDATE" -F ';' '{if ($1 < btime && $1 > atime) {print $0}}' | sort -s -t ';' -k 2,2 | 
+        awk -F ';' 'BEGIN{f="f"} {if (f=="f"){f="nf"}else if (t!=$2){printf "%-10s:%.2f\n",t,c} t=$2;c=$4} END{printf "%-10s:%.2f\n",t,c}' | sort -t ':' -k 2,2 -nr |
+        awk -F ':' 'BEGIN{f="f"} {if (f=="f"){f="nf";l=length($2)+1}else{printf t":%*.2f\n",l,n}t=$1;n=$2} END{printf t":%*.2f\n",l,n}' | sort -t ':' -k 1,1
+	exit 0
+elif [ "$COMMAND" = "hist-ord" ]; then			#command that print histogram of holding positions
+	eval "$INPUT" | grep -E "$FTICKER" | awk -v atime="$ADATE" -v btime="$BDATE" -F ';' '{if ($1 < btime && $1 > atime) {print $0}}' | awk -F ';' '{print $2}' | sort |
+	awk 'BEGIN{f="f";c=0}{if(f=="f"){f="nf"}else if($0==t){c++}else if($0!=t){printf "%-10s: ",t;{for(i=0;i<=c;i++)printf "#"}printf "\n";c=0}t=$0}END{printf "%-10s: ",t;{for(i=0;i<=c;i++)printf "#"}printf "\n"}' | sort -t ':' -k 2,2 -r |
+	awk -v w="$WIDTH" -F ':' 'BEGIN{f="f"} {if(f=="f") {f="nf";v=length($2)-1;{if(w=="") {printf $0"\n"}}}else if(w=="") {printf $0"\n"}else{printf t":";{if(int((ol/v)*w)!=0) {printf " "}};{for(i=0;i<int((ol/v)*w);i++)printf "#"};printf "\n"}t=$1;ol=length($2)-1} END{if(w=="") {2+2==4}else{printf t":";{if(int((ol/v)*w)!=0) {printf " "}};{for(i=0;i<int((ol/v)*w);i++) printf "#"};printf "\n"}}' | sort
+	exit 0
+elif [ "$COMMAND" = "graph-pos" ]; then			#command that print graph of values of holding positions
+        eval "$INPUT" | grep -E "$FTICKER" | awk -v atime="$ADATE" -v btime="$BDATE" -F ';' '{if ($1 < btime && $1 > atime) {print $0}}' | sort -t ';' -k 2,2 |
+        awk -F ';' 'BEGIN{s=0;b=0;f="f"}{if(f=="f"){f="nf";{if($3=="buy"){b+=$6}else if($3=="sell"){s+=$6}}}else if($2==t){if($3=="buy"){b+=$6}else if($3=="sell"){s+=$6}}else if($2!=t){printf "%-10s:%12.2f\n",t,(b-s)*pt;s=0;b=0;{if($3=="sell"){s+=$6}else if($3=="buy"){b+=$6}}}t=$2;pt=$4} END {printf "%-10s:%12.2f\n",t,(b-s)*pt}' |
+	awk -F ':' '{if($2<0){printf $1":%12.2f:-\n",$2*(-1)}else{printf $1":"$2":+\n"}}' | sort -t ':' -k 2,2 -nr | 
+	awk -v w="$WIDTH" -F ':' 'BEGIN{k="f"}{if (k=="f"){{if(w==""){w=int($2/1000)}};printf $1":";{if(w!=0){printf " "}};{for(i=0;i<w;i++){if($3=="+"){printf "#"}else{printf "!"}}};printf "\n";{if(w==0){k=0}else{k=$2/w}}}else{{if(k==0){c=0}else{c=int($2/k)}};printf $1":";{if(c!=0){printf " "}};{for(i=0;i<c;i++){if($3=="+"){printf "#"}else{printf "!"}}};printf "\n"}}' | sort
+	exit 0		#return success in the end of the command execute
+fi
+
