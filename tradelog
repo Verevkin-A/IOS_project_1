@@ -3,8 +3,9 @@
 export POSIXLY_CORRECT=yes
 export LC_NUMERIC=en_US.UTF-8
 
-#Project IOS#1 by Aleksandr Verevkin (xverev00)
-#VUT FIT 04.04.2021
+# Aleksandr Verevkin
+# List analysis project
+# Tradelog
 
 #help function
 
